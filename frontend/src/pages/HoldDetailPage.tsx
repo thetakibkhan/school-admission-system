@@ -39,12 +39,9 @@ export function HoldDetailPage() {
 
   // The server's status is authoritative. Only a HELD answer is refined locally, and
   // the refinement runs on the server's clock (Date header + elapsed), never on the
-  // browser clock, so a skewed browser cannot hide Pay/Cancel for a live hold.
-  // `serverHeldAnchor` records the response that overruled our local countdown.
-  const [serverHeldAnchor, setServerHeldAnchor] = useState<number | null>(null);
-  const awaitingServerVerdict = useRef(false);
-  const lastSeenAnchor = useRef<number | null>(null);
-
+  // browser clock, so a skewed browser cannot hide Pay/Cancel for a live hold. The
+  // refinement is never pinned: once the server-clock countdown reaches zero the hold
+  // is EXPIRED again, so a stale HELD answer cannot keep the actions alive forever.
   const status = useMemo(() => {
     if (payload === undefined) {
       return undefined;
@@ -52,11 +49,8 @@ export function HoldDetailPage() {
     if (payload.status !== "HELD" || meta === undefined) {
       return payload.status;
     }
-    if (serverHeldAnchor === meta.receivedAtMs) {
-      return "HELD";
-    }
-    return serverNow(meta, localNowMs) >= Date.parse(payload.expiresAt) ? "EXPIRED" : "HELD";
-  }, [payload, meta, localNowMs, serverHeldAnchor]);
+    return serverNow(meta, localNowMs) < Date.parse(payload.expiresAt) ? "HELD" : "EXPIRED";
+  }, [payload, meta, localNowMs]);
 
   // Tick once per second while the hold is still effectively HELD.
   useEffect(() => {
@@ -67,46 +61,30 @@ export function HoldDetailPage() {
     return () => window.clearInterval(timer);
   }, [status]);
 
-  // A new response arrived: if we had asked the server to overrule our countdown, its
-  // answer wins. HELD keeps the actions available; anything else is simply rendered.
-  // Without a Date header there is no server clock to trust, so the local derivation
-  // stands and the server cannot overrule it.
-  useEffect(() => {
-    if (payload === undefined || meta === undefined) {
-      return;
-    }
-    if (lastSeenAnchor.current === meta.receivedAtMs) {
-      return;
-    }
-    lastSeenAnchor.current = meta.receivedAtMs;
-    if (awaitingServerVerdict.current) {
-      awaitingServerVerdict.current = false;
-      setServerHeldAnchor(
-        payload.status === "HELD" && meta.hasServerClock ? meta.receivedAtMs : null,
-      );
-    }
-  }, [payload, meta]);
-
   // When our server-clock countdown reaches zero but the server still says HELD, ask
-  // once more and let the server's answer win. A server that answers EXPIRED needs no
-  // further asking, so this cannot loop.
+  // once and let the server's answer win. The flag resets whenever the hold is HELD
+  // again, so a fresh HELD answer gets a fresh refetch at the next zero, while a
+  // server that keeps answering HELD cannot make this spin.
   const refetchHold = holdQuery.refetch;
+  const expiryRefetched = useRef(false);
   useEffect(() => {
+    if (status === "HELD") {
+      expiryRefetched.current = false;
+      return;
+    }
     if (status !== "EXPIRED" || payload === undefined || meta === undefined) {
       return;
     }
-    if (payload.status !== "HELD" || !meta.hasServerClock || awaitingServerVerdict.current) {
+    if (payload.status !== "HELD" || !meta.hasServerClock || expiryRefetched.current) {
       return;
     }
-    awaitingServerVerdict.current = true;
+    expiryRefetched.current = true;
     void refetchHold();
   }, [status, payload, meta, refetchHold]);
 
   // A different hold starts from a clean slate.
   useEffect(() => {
-    awaitingServerVerdict.current = false;
-    lastSeenAnchor.current = null;
-    setServerHeldAnchor(null);
+    expiryRefetched.current = false;
   }, [holdId]);
 
   const confirmMutation = useMutation({
