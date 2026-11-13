@@ -87,32 +87,179 @@ public sealed class PersistenceTests : IClassFixture<AdmissionWebApplicationFact
         }
     }
 
-    [Fact]
+    [ComposeFileFact]
     public void ComposeFile_DeclaresNamedVolume_AndNoBindMountForPostgresData()
     {
-        var composePath = FindComposeFile();
-        var text = File.ReadAllText(composePath);
+        var composePath = ComposeFileLocator.Find()!;
 
-        // A named volume is declared at the top level and mounted for the database data directory.
-        Assert.Contains("volumes:", text, StringComparison.Ordinal);
-        Assert.Contains("pgdata:/var/lib/postgresql/data", text, StringComparison.Ordinal);
+        // Comments are stripped first: a comment that warns about `docker compose down -v` is not a
+        // shutdown command, and must not fail the check for the wrong reason.
+        var lines = File.ReadAllLines(composePath)
+            .Select(StripComment)
+            .ToArray();
 
-        // The data directory is mounted from the named volume only. A bind mount would put a host path
-        // ("./pgdata", "/srv/pgdata", "${PWD}/pgdata") before the colon.
-        var dataMounts = text
-            .Split('\n')
-            .Select(line => line.Trim())
-            .Where(line => line.Contains("/var/lib/postgresql/data", StringComparison.Ordinal))
-            .ToList();
+        // A named volume is declared at the top level.
+        Assert.Contains(lines, line => line.TrimEnd() == "volumes:");
+        Assert.Contains(lines, line => line.Trim() == "pgdata:");
 
-        Assert.NotEmpty(dataMounts);
-        Assert.All(dataMounts, line => Assert.StartsWith("- pgdata:", line, StringComparison.Ordinal));
+        // The database data directory is mounted from that named volume, in either the short
+        // ("pgdata:/var/lib/postgresql/data") or the long ("type: volume" / "source: pgdata") form.
+        var mounts = DataMounts(lines);
+        Assert.NotEmpty(mounts);
+        Assert.All(mounts, mount =>
+        {
+            Assert.Equal("volume", mount.Type);
+            Assert.Equal("pgdata", mount.Source);
+        });
 
-        // The normal shutdown flow never deletes the volume.
-        Assert.DoesNotContain("down -v", text, StringComparison.Ordinal);
+        // The normal shutdown flow never deletes the volume. Only real (non-comment) lines count.
+        Assert.DoesNotContain(lines, line => line.Contains("down -v", StringComparison.Ordinal));
     }
 
-    private static string FindComposeFile()
+    private const string PostgresDataPath = "/var/lib/postgresql/data";
+
+    private sealed record DataMount(string Source, string Type);
+
+    /// <summary>Removes a YAML comment: a <c>#</c> at line start or after whitespace.</summary>
+    private static string StripComment(string line)
+    {
+        for (var i = 0; i < line.Length; i++)
+        {
+            if (line[i] == '#' && (i == 0 || char.IsWhiteSpace(line[i - 1])))
+            {
+                return line[..i];
+            }
+        }
+
+        return line;
+    }
+
+    private static int Indent(string line) => line.Length - line.TrimStart().Length;
+
+    /// <summary>
+    /// Every volume list item whose target is the PostgreSQL data directory, parsed from either the
+    /// short or the long compose form.
+    /// </summary>
+    private static IReadOnlyList<DataMount> DataMounts(IReadOnlyList<string> lines)
+    {
+        var mounts = new List<DataMount>();
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var trimmed = lines[i].Trim();
+            if (!trimmed.StartsWith("- ", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            // One list item: the "- " line plus every following line indented deeper than it.
+            var itemIndent = Indent(lines[i]);
+            var item = new List<string> { trimmed[2..].Trim() };
+            var next = i + 1;
+            while (next < lines.Count
+                   && lines[next].Trim().Length > 0
+                   && Indent(lines[next]) > itemIndent)
+            {
+                item.Add(lines[next].Trim());
+                next++;
+            }
+
+            var mount = ParseMount(item);
+            if (mount is not null)
+            {
+                mounts.Add(mount);
+            }
+
+            i = next - 1;
+        }
+
+        return mounts;
+    }
+
+    private static DataMount? ParseMount(IReadOnlyList<string> item)
+    {
+        var first = item[0];
+        var colon = first.IndexOf(':');
+
+        // Short form: "<source>:<target>[:<mode>]".
+        if (colon > 0 && !IsLongFormKey(first[..colon]))
+        {
+            var source = first[..colon].Trim();
+            var target = first[(colon + 1)..].Split(':')[0].Trim();
+            return target == PostgresDataPath ? new DataMount(source, ClassifySource(source)) : null;
+        }
+
+        // Long form: "type:" / "source:" / "target:" keys in one list item.
+        string? type = null;
+        string? longSource = null;
+        string? longTarget = null;
+
+        foreach (var line in item)
+        {
+            var separator = line.IndexOf(':');
+            if (separator <= 0)
+            {
+                continue;
+            }
+
+            var key = line[..separator].Trim();
+            var value = line[(separator + 1)..].Trim();
+
+            switch (key)
+            {
+                case "type":
+                    type = value;
+                    break;
+                case "source":
+                    longSource = value;
+                    break;
+                case "target":
+                    longTarget = value;
+                    break;
+            }
+        }
+
+        if (longTarget != PostgresDataPath || longSource is null)
+        {
+            return null;
+        }
+
+        return new DataMount(longSource, type ?? ClassifySource(longSource));
+    }
+
+    private static bool IsLongFormKey(string key) =>
+        key is "type" or "source" or "target" or "read_only" or "volume";
+
+    /// <summary>A host path is a bind mount; a bare name is a named volume.</summary>
+    private static string ClassifySource(string source) =>
+        source.StartsWith('.') || source.StartsWith('/') || source.StartsWith('~')
+        || source.Contains('$') || source.Contains('\\')
+            ? "bind"
+            : "volume";
+}
+
+/// <summary>
+/// A <see cref="FactAttribute"/> that skips the compose check with a clear reason when
+/// <c>docker-compose.yml</c> is not reachable from the test output directory, for example when the
+/// test binary is copied out of the repository tree. xUnit 2.5 has no runtime skip, so the decision
+/// is made at discovery time.
+/// </summary>
+public sealed class ComposeFileFactAttribute : FactAttribute
+{
+    public ComposeFileFactAttribute()
+    {
+        if (ComposeFileLocator.Find() is null)
+        {
+            Skip = "docker-compose.yml was not found above the test output directory; run the suite " +
+                   "from inside the repository tree to check the compose persistence path.";
+        }
+    }
+}
+
+/// <summary>Locates <c>docker-compose.yml</c> by walking up from the test output directory.</summary>
+public static class ComposeFileLocator
+{
+    public static string? Find()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
 
@@ -127,7 +274,6 @@ public sealed class PersistenceTests : IClassFixture<AdmissionWebApplicationFact
             directory = directory.Parent;
         }
 
-        throw new FileNotFoundException(
-            "docker-compose.yml was not found above the test output directory.");
+        return null;
     }
 }
