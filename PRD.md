@@ -6,8 +6,6 @@
 **PRD version:** 1.0  
 **Status:** Approved planning baseline (implementation not yet verified)  
 **Prepared:** 13 November 2026  
-**Source:** `Asst_Software_Engineer_Project_Assignment (1).pdf`, pages 1–5, plus the 22 design decisions agreed in this conversation  
-**Assignment's stated deadline:** 11 November 2026, 11:59:59 PM (already past when this PRD was prepared)  
 **Implementation stack:** C# / ASP.NET Core 8+, PostgreSQL, EF Core (Npgsql), React 18+, TypeScript, Vite, Docker Compose
 
 > **Source-of-truth rule:** The assignment's mandatory functionality and API contract take precedence over design assumptions in this PRD. Requirements from the PDF are labeled **[SPEC]**; choices made during planning are labeled **[DECISION]**; gaps resolved here are labeled **[ASSUMPTION]**; optional improvements are labeled **[BONUS]**. Record material assumptions and their rationale in `ASSUMPTIONS.md`. Do not publish or commit the confidential assignment PDF to the public repository.

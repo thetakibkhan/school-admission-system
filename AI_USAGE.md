@@ -26,8 +26,8 @@ as a P1 before any frontend code existed:
 > shipping only package.json (`npm install` when no lock file exists), so the web image build fails and
 > Must-prove 1 breaks.
 
-The delivery task then reproduced it for real. `docker compose up --build -d` on the combined tree
-failed at the `web` service with:
+The delivery task then reproduced it for real. `docker compose up --build -d` on this branch failed at
+the `web` service with:
 
 ```text
 #29 0.535 npm error The `npm ci` command can only install with an existing package-lock.json or
@@ -40,41 +40,47 @@ SPA fallback, so a browser refresh on any React Router path would return `404` �
 broken the "My Applications restored after a browser restart" requirement even after the build was
 fixed.
 
-Both are recorded in `.herdsman/school-admission-2026-11-13/reports/review-foundation-1.md` and are
-fixed by the integrator in `frontend/Dockerfile` (a lockfile-aware install, and an `nginx.conf` with
-`try_files $uri $uri/ /index.html`). The delivery task did not edit the Dockerfile, because that file
-belongs to the foundation task.
+Both are recorded in `.herdsman/school-admission-2026-11-13/reports/review-foundation-1.md`; the
+foundation task fixed them in commit `3c80da4` (a lockfile-aware install, and an `nginx.conf` with
+`try_files $uri $uri/ /index.html`).
 
-Two smaller real errors, both recorded in the route's reports:
+A second real error is recorded in the foundation task's own report:
 
 - An orphaned `VBCSCompiler` process outlived a build and kept the machine-wide check lock, so later
   checks waited forever. Caught by reading the lock holder with `ps`; fixed by adding
   `-p:UseSharedCompilation=false -nodeReuse:false` to every build and test command.
-- xUnit's default class-level parallelism let one test class drop the shared test schema while another
-  class was mid-request, producing spurious `503`s. Caught by the classes task when its own tests
-  failed intermittently; fixed with `DisableTestParallelization` in the test assembly.
 
-## How the result was verified by a human
+## How the result was verified
 
-The human's role was to set the contract, review the evidence, and run the acceptance path — not to
-take the agents' word for it.
+This section records only what the route's reports actually show, plus the checks run directly by the
+delivery task. Anything not yet verified is named as pending.
 
 - **Business rules.** The PRD's state-transition table (section 5.3) and error-code table (section 6.2)
   were written by the human in the planning conversation, before any code. Every implementer task was
-  given those tables as its contract, and the reviewer checked the code against them rather than
-  against the implementer's own description. The assumptions the PRD left open are written down in
-  `ASSUMPTIONS.md` so a reader can disagree with a specific choice instead of guessing at it.
-- **Concurrency.** The concurrency test is not a mock and not an in-memory provider: it starts the real
-  API over the real HTTP stack against a real PostgreSQL database, fires 50 simultaneous distinct-student
-  hold requests at a 10-seat class, and asserts `heldSeats + confirmedSeats <= totalSeats` afterwards.
-  It was required to fail when the class row lock is removed, so a passing run means the lock is doing
-  the work. The human ran the documented test command and read the pass count.
-- **The Docker path.** The human ran `docker compose up --build` from a clean tree, called the API with
-  `curl`, and ran `docker compose down` followed by `docker compose up` to confirm the data survived.
-  The exact commands and their real output are in the delivery report.
-- **The UI.** The four required workflows were walked through in a browser with no Postman and no
-  database edits: create a class, watch the class list poll, reserve and confirm or cancel with the
-  countdown, and reopen the browser to see My Applications restored from `localStorage`.
+  given those tables as its contract, and the reviewer agent checked the code against them rather than
+  against the implementer's own description — that is how the `npm ci` defect in `frontend/Dockerfile`
+  was found. The assumptions the PRD left open are written down in `ASSUMPTIONS.md` so a reader can
+  disagree with a specific choice instead of guessing at it.
+- **The Docker path, database and API.** Verified on this branch for the services that exist: the
+  delivery task ran `docker compose up --build -d db api` (exit 0), waited for `/health`
+  (`200 {"status":"ok"}`), then ran `docker compose down` and `docker compose up -d` and confirmed a row
+  written to PostgreSQL before the shutdown was still present afterwards. The exact commands and output
+  are in `.herdsman/school-admission-2026-11-13/reports/delivery.md`. The full `docker compose up
+  --build` including the `web` service **did not pass** on this branch: the frontend source is not here
+  yet, and the build stops at `RUN npm ci` because there is no `package.json`. It is recorded under
+  `gaps:`, not claimed as a pass.
+- **The concurrency proof is pending.** The 50-request overselling test is a Must-prove item written by
+  the concurrency task. No branch in this route contains it yet, and no run of it has been recorded.
+  `README.md` marks it as required and pending. When it lands, the human's check is to run the
+  documented command, read the pass count, and confirm the test fails when the class row lock is
+  removed.
+- **The UI walkthrough is pending.** The four required workflows — create a class, watch the list poll,
+  reserve/confirm/cancel with the countdown, and reopen the browser to see My Applications restored
+  from `localStorage` — have not been walked in a browser and no route report records a browser
+  session. They depend on the frontend branch and on a full `docker compose up --build`, neither of
+  which is present on this branch.
+- **The backend tests that do exist were run.** 18 foundation tests passed against real PostgreSQL
+  through the documented command, and the classes task reports 34/34 on its branch.
 
 ## Secrets and personal data
 

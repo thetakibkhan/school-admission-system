@@ -58,7 +58,7 @@ Copy `.env.example` to `.env` and change what you need. Compose reads `.env` aut
 | `POSTGRES_DB` | `school_admission` | db, API | Database name created on first start. |
 | `ConnectionStrings__DefaultConnection` | `Host=db;Port=5432;Username=…;Password=…;Database=…` | API | Full Npgsql connection string. Compose builds it from the three `POSTGRES_*` values; set it directly to point the API at another database. |
 | `ASPNETCORE_URLS` | `http://0.0.0.0:8080` | API | Address the API binds to inside its container. Compose publishes it on host port 8080. |
-| `VITE_API_BASE_URL` | `http://localhost:8080` in `.env.example`; unset in the container build | frontend build | Base URL the browser uses for API calls. Vite inlines `VITE_*` variables at **build** time, so changing it requires `docker compose up --build`, not just a restart. The Compose build does not currently pass it as a build argument, so the container build uses the client's same-origin fallback (`""`) and the browser calls the API on the frontend's own origin. See "Known limitations". |
+| `VITE_API_BASE_URL` | `http://localhost:8080` (from `frontend/.env.production`) | frontend build | Base URL the browser uses for API calls. Vite inlines `VITE_*` variables at **build** time, so changing it requires `docker compose up --build`, not just a restart. The container build runs `vite build` in production mode, which loads `frontend/.env.production` and inlines `http://localhost:8080`; the browser then calls the API directly and the API's `FRONTEND_ORIGIN` CORS allowance covers it. |
 | `FRONTEND_ORIGIN` | `http://localhost:5173` | API | The single origin allowed by the API's CORS policy. |
 
 ## API
@@ -127,8 +127,12 @@ database**. There is no in-memory provider and no fallback connection string: th
    without them, but the concurrency test is easier to read when it is not competing for CPU.
 
 The suite covers the API contract, the hold lifecycle (create, duplicate, confirm, cancel, expiry),
-ownership, idempotency, and a concurrency test that fires 50 simultaneous distinct-student hold
-requests at a 10-seat class and asserts `heldSeats + confirmedSeats <= totalSeats` afterwards.
+ownership and idempotency.
+
+**Required but pending:** a concurrency test that fires 50 simultaneous distinct-student hold requests
+at a 10-seat class and asserts `heldSeats + confirmedSeats <= totalSeats` afterwards. That test is a
+Must-prove item and is written by the concurrency task; it is not in the tree yet, so the command above
+does not run it today. The README is updated when that branch lands.
 
 ## Frontend tests and type check
 
@@ -181,11 +185,10 @@ server's `expiresAt` is authoritative.
 - **Open admin class creation.** Anyone who can reach the API can create a class. That is deliberate:
   the assignment specifies no login, so the admin screen is a demo action.
 - **`VITE_API_BASE_URL` is a build-time value.** Changing it needs a rebuild, not a restart. The
-  Compose build does not pass it as a build argument, so the container build falls back to the
-  same-origin base URL. The nginx image serves only static files and does not proxy `/classes`,
-  `/holds` or `/me` to the API, so a containerised frontend needs either that proxy or
-  `VITE_API_BASE_URL=http://localhost:8080` passed as a build argument. Running the frontend with
-  `npm run dev` is unaffected: the Vite dev server proxies those paths to `http://localhost:8080`.
+  container build takes `http://localhost:8080` from `frontend/.env.production`, so the bundled UI
+  calls the API directly across origins and depends on the API's CORS allowance for
+  `FRONTEND_ORIGIN`. Running the frontend with `npm run dev` uses the Vite dev server's proxy for
+  `/classes`, `/holds` and `/me` instead, so no CORS is involved in development.
 - **Single school.** Class names are unique case-insensitively across the whole database, which is
   correct for one school and would need a school scope for more.
 
