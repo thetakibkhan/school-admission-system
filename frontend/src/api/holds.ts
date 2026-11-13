@@ -1,4 +1,5 @@
-import { request } from "./client";
+import { request, requestWithMeta } from "./client";
+import type { RequestResult } from "./client";
 import type {
   HoldConfirmedResponse,
   HoldCreatedResponse,
@@ -15,6 +16,17 @@ export function createHold(classId: string, studentId: string): Promise<HoldCrea
 
 export function getHold(holdId: string, signal?: AbortSignal): Promise<HoldResponse> {
   return request<HoldResponse>(`/holds/${encodeURIComponent(holdId)}`, { signal });
+}
+
+/**
+ * Same endpoint as getHold, but keeps the response's server-clock anchor so the
+ * detail page can count down against server time instead of the browser clock.
+ */
+export function getHoldWithMeta(
+  holdId: string,
+  signal?: AbortSignal,
+): Promise<RequestResult<HoldResponse>> {
+  return requestWithMeta<HoldResponse>(`/holds/${encodeURIComponent(holdId)}`, { signal });
 }
 
 export function confirmHold(

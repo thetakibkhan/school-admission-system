@@ -29,6 +29,26 @@ export function remainingMs(expiresAt: string, nowMs: number = Date.now()): numb
   return Math.max(0, expiry - nowMs);
 }
 
+/**
+ * The response's `Date` header pins the server clock at the moment the answer was
+ * generated; adding the time elapsed since we received it estimates the server's
+ * current time without trusting the browser clock. A skewed browser clock must never
+ * overrule a server that still says HELD.
+ */
+export interface ServerClockAnchor {
+  /** Server clock at response time (Date header, or local receipt when absent). */
+  serverTimeMs: number;
+  /** Local clock when that response was received. */
+  receivedAtMs: number;
+}
+
+export function serverNow(
+  anchor: ServerClockAnchor,
+  localNowMs: number = Date.now(),
+): number {
+  return anchor.serverTimeMs + Math.max(0, localNowMs - anchor.receivedAtMs);
+}
+
 /** Formats a duration as mm:ss (or h:mm:ss past an hour). */
 export function formatCountdown(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));

@@ -65,7 +65,35 @@ async function parseProblem(response: Response): Promise<ApiError> {
   return new ApiError({ status, title, detail });
 }
 
-export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+export interface ResponseMeta {
+  /** Server clock at response time, from the Date header (falls back to local receipt). */
+  serverTimeMs: number;
+  /** Local clock when the response was received. */
+  receivedAtMs: number;
+  /** True when the server actually supplied its clock (a Date header). */
+  hasServerClock: boolean;
+}
+
+export interface RequestResult<T> {
+  data: T;
+  meta: ResponseMeta;
+}
+
+function readMeta(response: Response, receivedAtMs: number): ResponseMeta {
+  const header = response.headers.get("Date");
+  const parsed = header === null ? Number.NaN : Date.parse(header);
+  const hasServerClock = !Number.isNaN(parsed);
+  return {
+    serverTimeMs: hasServerClock ? parsed : receivedAtMs,
+    receivedAtMs,
+    hasServerClock,
+  };
+}
+
+export async function requestWithMeta<T>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<RequestResult<T>> {
   const { method = "GET", body, studentId, signal } = options;
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -88,13 +116,21 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     throw new NetworkError();
   }
 
+  const receivedAtMs = Date.now();
+  const meta = readMeta(response, receivedAtMs);
+
   if (!response.ok) {
     throw await parseProblem(response);
   }
 
   if (response.status === 204) {
-    return undefined as T;
+    return { data: undefined as T, meta };
   }
 
-  return (await response.json()) as T;
+  return { data: (await response.json()) as T, meta };
+}
+
+export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const result = await requestWithMeta<T>(path, options);
+  return result.data;
 }

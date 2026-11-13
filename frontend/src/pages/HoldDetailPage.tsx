@@ -1,15 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getClass } from "../api/classes";
-import { cancelHold, confirmHold, getHold } from "../api/holds";
+import { cancelHold, confirmHold, getHoldWithMeta } from "../api/holds";
 import { useStudentId } from "../hooks/useStudentId";
 import { queryKeys } from "../lib/queryKeys";
 import {
-  effectiveStatus,
   formatCountdown,
   formatTimestamp,
   remainingMs,
+  serverNow,
 } from "../lib/holdStatus";
 import { ErrorState, InlineError, LoadingState } from "../components/States";
 
@@ -19,47 +19,95 @@ export function HoldDetailPage() {
   const { holdId = "" } = useParams<{ holdId: string }>();
   const { studentId } = useStudentId();
   const queryClient = useQueryClient();
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [localNowMs, setLocalNowMs] = useState(() => Date.now());
 
   const holdQuery = useQuery({
     queryKey: queryKeys.hold(holdId),
-    queryFn: ({ signal }) => getHold(holdId, signal),
+    queryFn: ({ signal }) => getHoldWithMeta(holdId, signal),
     enabled: holdId.length > 0,
   });
 
-  const classId = holdQuery.data?.classId;
+  const payload = holdQuery.data?.data;
+  const meta = holdQuery.data?.meta;
+
+  const classId = payload?.classId;
   const classQuery = useQuery({
     queryKey: queryKeys.class(classId ?? ""),
     queryFn: ({ signal }) => getClass(classId ?? "", signal),
     enabled: classId !== undefined && classId.length > 0,
   });
 
-  const status =
-    holdQuery.data === undefined
-      ? undefined
-      : effectiveStatus(holdQuery.data.status, holdQuery.data.expiresAt, nowMs);
+  // The server's status is authoritative. Only a HELD answer is refined locally, and
+  // the refinement runs on the server's clock (Date header + elapsed), never on the
+  // browser clock, so a skewed browser cannot hide Pay/Cancel for a live hold.
+  // `serverHeldAnchor` records the response that overruled our local countdown.
+  const [serverHeldAnchor, setServerHeldAnchor] = useState<number | null>(null);
+  const awaitingServerVerdict = useRef(false);
+  const lastSeenAnchor = useRef<number | null>(null);
+
+  const status = useMemo(() => {
+    if (payload === undefined) {
+      return undefined;
+    }
+    if (payload.status !== "HELD" || meta === undefined) {
+      return payload.status;
+    }
+    if (serverHeldAnchor === meta.receivedAtMs) {
+      return "HELD";
+    }
+    return serverNow(meta, localNowMs) >= Date.parse(payload.expiresAt) ? "EXPIRED" : "HELD";
+  }, [payload, meta, localNowMs, serverHeldAnchor]);
 
   // Tick once per second while the hold is still effectively HELD.
   useEffect(() => {
     if (status !== "HELD") {
       return;
     }
-    const timer = window.setInterval(() => setNowMs(Date.now()), TICK_MS);
+    const timer = window.setInterval(() => setLocalNowMs(Date.now()), TICK_MS);
     return () => window.clearInterval(timer);
   }, [status]);
 
-  // When the countdown reaches zero, ask the server once so its answer wins.
-  const refetchedOnExpiry = useRef(false);
+  // A new response arrived: if we had asked the server to overrule our countdown, its
+  // answer wins. HELD keeps the actions available; anything else is simply rendered.
+  // Without a Date header there is no server clock to trust, so the local derivation
+  // stands and the server cannot overrule it.
+  useEffect(() => {
+    if (payload === undefined || meta === undefined) {
+      return;
+    }
+    if (lastSeenAnchor.current === meta.receivedAtMs) {
+      return;
+    }
+    lastSeenAnchor.current = meta.receivedAtMs;
+    if (awaitingServerVerdict.current) {
+      awaitingServerVerdict.current = false;
+      setServerHeldAnchor(
+        payload.status === "HELD" && meta.hasServerClock ? meta.receivedAtMs : null,
+      );
+    }
+  }, [payload, meta]);
+
+  // When our server-clock countdown reaches zero but the server still says HELD, ask
+  // once more and let the server's answer win. A server that answers EXPIRED needs no
+  // further asking, so this cannot loop.
   const refetchHold = holdQuery.refetch;
   useEffect(() => {
-    refetchedOnExpiry.current = false;
-  }, [holdId]);
-  useEffect(() => {
-    if (status === "EXPIRED" && !refetchedOnExpiry.current) {
-      refetchedOnExpiry.current = true;
-      void refetchHold();
+    if (status !== "EXPIRED" || payload === undefined || meta === undefined) {
+      return;
     }
-  }, [status, refetchHold]);
+    if (payload.status !== "HELD" || !meta.hasServerClock || awaitingServerVerdict.current) {
+      return;
+    }
+    awaitingServerVerdict.current = true;
+    void refetchHold();
+  }, [status, payload, meta, refetchHold]);
+
+  // A different hold starts from a clean slate.
+  useEffect(() => {
+    awaitingServerVerdict.current = false;
+    lastSeenAnchor.current = null;
+    setServerHeldAnchor(null);
+  }, [holdId]);
 
   const confirmMutation = useMutation({
     mutationFn: () => {
@@ -114,10 +162,20 @@ export function HoldDetailPage() {
     );
   }
 
-  const hold = holdQuery.data;
+  if (payload === undefined || meta === undefined) {
+    return (
+      <main className="mx-auto max-w-2xl px-4 py-6">
+        <LoadingState label="Loading application…" />
+      </main>
+    );
+  }
+
+  const hold = payload;
   const className = classQuery.data?.name ?? "Class";
   const isHeld = status === "HELD";
   const actionError = confirmMutation.error ?? cancelMutation.error;
+  // Count down on the server clock so a skewed browser clock cannot mislead.
+  const countdownMs = remainingMs(hold.expiresAt, serverNow(meta, localNowMs));
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-6">
@@ -147,7 +205,7 @@ export function HoldDetailPage() {
           <div className="flex justify-between gap-4">
             <dt className="font-medium text-slate-600">Time remaining</dt>
             <dd className="text-right font-mono text-slate-900" data-testid="countdown">
-              {formatCountdown(remainingMs(hold.expiresAt, nowMs))}
+              {formatCountdown(countdownMs)}
             </dd>
           </div>
         ) : null}
