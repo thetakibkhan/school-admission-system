@@ -1,9 +1,22 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using SchoolAdmission.Api.Data;
 using SchoolAdmission.Api.Models;
+using SchoolAdmission.Api.Services;
+
+// Every test class calls AdmissionWebApplicationFactory.ResetDatabase against one shared PostgreSQL
+// database, so xUnit's class-level parallelism makes one class drop the schema while another is
+// querying it (spurious 503s and KeyNotFoundException). Serialize the whole assembly.
+//
+// wip/holds declares the same attribute in backend.Tests/AssemblyInfo.cs. Two [assembly:
+// CollectionBehavior] attributes in one assembly are a CS0579 duplicate-attribute build error, so at
+// merge time exactly one must survive: AssemblyInfo.cs wins and this copy is dropped.
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
 
 namespace SchoolAdmission.Tests;
 
@@ -15,16 +28,31 @@ public sealed class ClassesTests : IClassFixture<AdmissionWebApplicationFactory>
 
     private readonly AdmissionWebApplicationFactory _factory;
 
+    // ClassService is constructor-injected into ClassesController and its registration belongs in the
+    // foundation-owned Program.cs (R11), so until the integrator lands that handoff the registration is
+    // supplied here. Once Program.cs registers the service this extra registration is redundant but
+    // harmless. Both hosts point at the same database, so the DB helpers stay on _factory.
+    //
+    // xUnit constructs this class once per test, so the derived host is built once for the whole class
+    // and reused; building it per test would leave an undisposed host per test.
+    private static WebApplicationFactory<Program>? _sharedApi;
+
+    private readonly WebApplicationFactory<Program> _api;
+
     public ClassesTests(AdmissionWebApplicationFactory factory)
     {
         _factory = factory;
         _factory.ResetDatabase();
+        _api = _sharedApi ??= factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services => services.AddScoped<ClassService>()));
     }
+
+    private HttpClient CreateClient() => _api.CreateClient();
 
     [Fact]
     public async Task Create_ValidClass_Returns201WithExactFieldsAndLocation()
     {
-        using var client = _factory.CreateApiClient();
+        using var client = CreateClient();
 
         using var response = await client.PostAsJsonAsync(
             "/classes",
@@ -53,7 +81,7 @@ public sealed class ClassesTests : IClassFixture<AdmissionWebApplicationFactory>
     [InlineData(-5)]
     public async Task Create_NonPositiveTotalSeats_Returns400AndInsertsNothing(int totalSeats)
     {
-        using var client = _factory.CreateApiClient();
+        using var client = CreateClient();
 
         using var response = await client.PostAsJsonAsync("/classes", new { name = "Class 7", totalSeats });
 
@@ -70,7 +98,7 @@ public sealed class ClassesTests : IClassFixture<AdmissionWebApplicationFactory>
     [Fact]
     public async Task Create_TotalSeatsAboveLimit_Returns400()
     {
-        using var client = _factory.CreateApiClient();
+        using var client = CreateClient();
 
         using var response = await client.PostAsJsonAsync("/classes", new { name = "Huge", totalSeats = 100_001 });
 
@@ -82,7 +110,7 @@ public sealed class ClassesTests : IClassFixture<AdmissionWebApplicationFactory>
     [InlineData("   ")]
     public async Task Create_BlankName_Returns400(string name)
     {
-        using var client = _factory.CreateApiClient();
+        using var client = CreateClient();
 
         using var response = await client.PostAsJsonAsync("/classes", new { name, totalSeats = 30 });
 
@@ -99,7 +127,7 @@ public sealed class ClassesTests : IClassFixture<AdmissionWebApplicationFactory>
     [Fact]
     public async Task Create_NameDifferingOnlyByCaseAndSpaces_Returns409AndKeepsOneRow()
     {
-        using var client = _factory.CreateApiClient();
+        using var client = CreateClient();
 
         using var first = await client.PostAsJsonAsync("/classes", new { name = "Class 6 - Morning Shift", totalSeats = 40 });
         Assert.Equal(HttpStatusCode.Created, first.StatusCode);
@@ -118,7 +146,7 @@ public sealed class ClassesTests : IClassFixture<AdmissionWebApplicationFactory>
     [Fact]
     public async Task Create_TwoShiftNames_CreateIndependentClassesWithIndependentCounts()
     {
-        using var client = _factory.CreateApiClient();
+        using var client = CreateClient();
 
         var morning = await CreateClassAsync(client, "Class 6 - Morning Shift", 10);
         var day = await CreateClassAsync(client, "Class 6 - Day Shift", 20);
@@ -150,7 +178,7 @@ public sealed class ClassesTests : IClassFixture<AdmissionWebApplicationFactory>
     [Fact]
     public async Task List_EmptyDatabase_Returns200WithEmptyArray()
     {
-        using var client = _factory.CreateApiClient();
+        using var client = CreateClient();
 
         using var response = await client.GetAsync("/classes");
 
@@ -163,7 +191,7 @@ public sealed class ClassesTests : IClassFixture<AdmissionWebApplicationFactory>
     [Fact]
     public async Task List_NewClass_ReportsZeroHeldZeroConfirmedAndFullAvailability()
     {
-        using var client = _factory.CreateApiClient();
+        using var client = CreateClient();
         var id = await CreateClassAsync(client, "Class 8", 25);
 
         using var response = await client.GetAsync("/classes");
@@ -187,7 +215,7 @@ public sealed class ClassesTests : IClassFixture<AdmissionWebApplicationFactory>
     [Fact]
     public async Task List_OrdersByCreatedAtThenId()
     {
-        using var client = _factory.CreateApiClient();
+        using var client = CreateClient();
         var first = await CreateClassAsync(client, "Class 1", 10);
         var second = await CreateClassAsync(client, "Class 2", 10);
         var third = await CreateClassAsync(client, "Class 3", 10);
@@ -205,7 +233,7 @@ public sealed class ClassesTests : IClassFixture<AdmissionWebApplicationFactory>
     [Fact]
     public async Task Get_UnknownId_Returns404ProblemDetails()
     {
-        using var client = _factory.CreateApiClient();
+        using var client = CreateClient();
 
         using var response = await client.GetAsync("/classes/c_doesnotexist");
 
@@ -220,7 +248,7 @@ public sealed class ClassesTests : IClassFixture<AdmissionWebApplicationFactory>
     [Fact]
     public async Task Get_KnownClass_ReturnsExactSixFields()
     {
-        using var client = _factory.CreateApiClient();
+        using var client = CreateClient();
         var id = await CreateClassAsync(client, "Class 9", 15);
 
         using var response = await client.GetAsync($"/classes/{id}");
@@ -236,7 +264,7 @@ public sealed class ClassesTests : IClassFixture<AdmissionWebApplicationFactory>
     [Fact]
     public async Task Get_SeatCounts_AreDerivedFromHoldRows()
     {
-        using var client = _factory.CreateApiClient();
+        using var client = CreateClient();
         var id = await CreateClassAsync(client, "Class 10", 10);
 
         await _factory.WithDbAsync(async db =>
@@ -291,7 +319,7 @@ public sealed class ClassesTests : IClassFixture<AdmissionWebApplicationFactory>
     [Fact]
     public async Task Get_CancelledHold_DoesNotOccupyASeat()
     {
-        using var client = _factory.CreateApiClient();
+        using var client = CreateClient();
         var id = await CreateClassAsync(client, "Class 11", 5);
 
         await _factory.WithDbAsync(async db =>
@@ -320,7 +348,7 @@ public sealed class ClassesTests : IClassFixture<AdmissionWebApplicationFactory>
     [Fact]
     public async Task ClassRoutes_DoNotRequireStudentHeader()
     {
-        using var client = _factory.CreateApiClient();
+        using var client = CreateClient();
 
         using var create = await client.PostAsJsonAsync("/classes", new { name = "Class 12", totalSeats = 3 });
         Assert.Equal(HttpStatusCode.Created, create.StatusCode);
