@@ -23,13 +23,19 @@ public sealed class HoldsTests : IClassFixture<AdmissionWebApplicationFactory>
     // foundation-owned Program.cs (R11), so until the integrator lands that handoff the registration is
     // supplied here. Once Program.cs registers the service this extra registration is redundant but
     // harmless. Both hosts point at the same database, so the DB helpers stay on _factory.
+    //
+    // xUnit constructs this class once per test, so the derived host is built once for the whole class
+    // and reused; building it per test would leave 24 undisposed hosts per run. It lives for the
+    // process, which is what the shared class fixture does too.
+    private static WebApplicationFactory<Program>? _sharedApi;
+
     private readonly WebApplicationFactory<Program> _api;
 
     public HoldsTests(AdmissionWebApplicationFactory factory)
     {
         _factory = factory;
         _factory.ResetDatabase();
-        _api = factory.WithWebHostBuilder(builder =>
+        _api = _sharedApi ??= factory.WithWebHostBuilder(builder =>
             builder.ConfigureServices(services => services.AddScoped<HoldService>()));
     }
 

@@ -12,8 +12,7 @@ public sealed class MeController : ControllerBase
     private readonly HoldService _holds;
 
     // HoldService is registered by Program.cs (foundation-owned, R11); see the handoff line in the
-    // task report. Until that registration lands, MVC's default controller activator still builds the
-    // service from its own registered dependencies.
+    // task report. Until that registration lands, every hold route returns 500.
     public MeController(HoldService holds)
     {
         _holds = holds;
