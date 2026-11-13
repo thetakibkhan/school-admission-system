@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using SchoolAdmission.Api.Data;
 using SchoolAdmission.Api.Dtos;
 using SchoolAdmission.Api.Services;
 
@@ -15,11 +14,9 @@ public sealed class ClassesController : ControllerBase
 {
     private readonly ClassService _service;
 
-    // ClassService is constructed here because Program.cs is owned by the foundation task (R11) and
-    // cannot gain a DI registration from this branch. The controller still holds no business logic.
-    public ClassesController(AdmissionDbContext db)
+    public ClassesController(ClassService service)
     {
-        _service = new ClassService(db);
+        _service = service;
     }
 
     [HttpPost]

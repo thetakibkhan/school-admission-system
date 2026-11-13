@@ -5,11 +5,6 @@ using Microsoft.EntityFrameworkCore;
 using SchoolAdmission.Api.Data;
 using SchoolAdmission.Api.Models;
 
-// Every test class in this assembly calls AdmissionWebApplicationFactory.ResetDatabase, which drops
-// and recreates the schema. xUnit runs test classes in parallel by default, so one class would drop
-// the tables while another is mid-request and the API would answer 503. Serialize the assembly.
-[assembly: CollectionBehavior(DisableTestParallelization = true)]
-
 namespace SchoolAdmission.Tests;
 
 public sealed class ClassesTests : IClassFixture<AdmissionWebApplicationFactory>
