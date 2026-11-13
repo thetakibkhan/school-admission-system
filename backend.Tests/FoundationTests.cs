@@ -156,6 +156,83 @@ public sealed class FoundationTests : IClassFixture<AdmissionWebApplicationFacto
         Assert.Equal(40, counts.AvailableSeats);
     }
 
+    [Fact]
+    public async Task SeatCounts_ForAll_OrdersByCreatedAtThenId_AndCountsHolds()
+    {
+        var olderId = IdGenerator.NewClassId();
+        var newerId = IdGenerator.NewClassId();
+        var sameInstantFirstId = IdGenerator.NewClassId();
+        var sameInstantSecondId = IdGenerator.NewClassId();
+        var sameInstant = new DateTime(2026, 11, 1, 4, 0, 0, DateTimeKind.Utc);
+        var older = sameInstant.AddMinutes(-10);
+        var newer = sameInstant.AddMinutes(10);
+
+        var result = await _factory.WithDbAsync(async db =>
+        {
+            var now = await DatabaseClock.NowAsync(db, CancellationToken.None);
+
+            db.Classes.AddRange(
+                new ClassEntity { Id = newerId, Name = "Newer", NormalizedName = "newer", TotalSeats = 5, CreatedAt = newer },
+                new ClassEntity { Id = olderId, Name = "Older", NormalizedName = "older", TotalSeats = 10, CreatedAt = older },
+                new ClassEntity { Id = sameInstantSecondId, Name = "Tie B", NormalizedName = "tie b", TotalSeats = 3, CreatedAt = sameInstant },
+                new ClassEntity { Id = sameInstantFirstId, Name = "Tie A", NormalizedName = "tie a", TotalSeats = 3, CreatedAt = sameInstant });
+
+            db.Holds.AddRange(
+                // older: one active hold, one expired hold, one confirmed, one cancelled.
+                NewHold(olderId, "11111111111111111", "HELD", now.AddMinutes(5)),
+                NewHold(olderId, "22222222222222222", "HELD", now.AddMinutes(-5)),
+                NewHold(olderId, "33333333333333333", "CONFIRMED", now.AddMinutes(-5)),
+                NewHold(olderId, "44444444444444444", "CANCELLED", now.AddMinutes(5)),
+                // newer: one active hold only.
+                NewHold(newerId, "55555555555555555", "HELD", now.AddMinutes(5)));
+
+            await db.SaveChangesAsync();
+
+            return await SeatCountQueries.ForAllAsync(db, now, CancellationToken.None);
+        });
+
+        var tieOrder = new[] { sameInstantFirstId, sameInstantSecondId }
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            new[] { olderId, tieOrder[0], tieOrder[1], newerId },
+            result.Select(r => r.Class.Id).ToArray());
+
+        var olderCounts = result.Single(r => r.Class.Id == olderId).Counts;
+        Assert.Equal(10, olderCounts.TotalSeats);
+        Assert.Equal(1, olderCounts.HeldSeats);
+        Assert.Equal(1, olderCounts.ConfirmedSeats);
+        Assert.Equal(8, olderCounts.AvailableSeats);
+
+        var newerCounts = result.Single(r => r.Class.Id == newerId).Counts;
+        Assert.Equal(5, newerCounts.TotalSeats);
+        Assert.Equal(1, newerCounts.HeldSeats);
+        Assert.Equal(0, newerCounts.ConfirmedSeats);
+        Assert.Equal(4, newerCounts.AvailableSeats);
+
+        foreach (var tieId in tieOrder)
+        {
+            var tieCounts = result.Single(r => r.Class.Id == tieId).Counts;
+            Assert.Equal(0, tieCounts.HeldSeats);
+            Assert.Equal(0, tieCounts.ConfirmedSeats);
+            Assert.Equal(3, tieCounts.AvailableSeats);
+        }
+    }
+
+    private static HoldEntity NewHold(string classId, string studentId, string status, DateTime expiresAt) =>
+        new()
+        {
+            Id = IdGenerator.NewHoldId(),
+            ClassId = classId,
+            StudentId = studentId,
+            Status = status,
+            CreatedAt = new DateTime(2026, 11, 1, 4, 0, 0, DateTimeKind.Utc),
+            ExpiresAt = expiresAt,
+            ConfirmedAt = status == "CONFIRMED" ? new DateTime(2026, 11, 1, 4, 0, 0, DateTimeKind.Utc) : null,
+            CancelledAt = status == "CANCELLED" ? new DateTime(2026, 11, 1, 4, 0, 0, DateTimeKind.Utc) : null
+        };
+
     [Theory]
     [InlineData("00000000000000000", true)]
     [InlineData("20152691234567890", true)]
