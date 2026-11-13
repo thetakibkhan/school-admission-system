@@ -100,8 +100,8 @@ The tests are xUnit integration tests that run the real HTTP stack against a **r
 database**. There is no in-memory provider and no fallback connection string: the test host reads
 `TEST_DATABASE_URL` and fails loudly when it is missing.
 
-1. Start a PostgreSQL 17 instance you can reach from the host. The simplest way is the Compose
-   database, published on port 5433:
+1. Start a PostgreSQL 17 instance you can reach from the host. The Compose `db` service publishes no
+   host port, so it cannot be reached from the host directly; run a standalone container instead:
 
    ```bash
    docker run -d --name admission-test-pg -p 5433:5432 \

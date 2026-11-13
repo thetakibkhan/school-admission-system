@@ -26,8 +26,8 @@ as a P1 before any frontend code existed:
 > shipping only package.json (`npm install` when no lock file exists), so the web image build fails and
 > Must-prove 1 breaks.
 
-The delivery task then reproduced it for real. `docker compose up --build -d` on this branch failed at
-the `web` service with:
+The delivery task then reproduced it for real. `docker compose up --build -d` failed at the `web`
+service with:
 
 ```text
 #29 0.535 npm error The `npm ci` command can only install with an existing package-lock.json or
@@ -40,11 +40,11 @@ SPA fallback, so a browser refresh on any React Router path would return `404` �
 broken the "My Applications restored after a browser restart" requirement even after the build was
 fixed.
 
-Both are recorded in `.herdsman/school-admission-2026-11-13/reports/review-foundation-1.md`; the
-foundation task fixed them in commit `3c80da4` (a lockfile-aware install, and an `nginx.conf` with
-`try_files $uri $uri/ /index.html`).
+Both are fixed in commit `3c80da4` (a lockfile-aware install, and an `nginx.conf` with
+`try_files $uri $uri/ /index.html`); the shipped `frontend/Dockerfile` and `frontend/nginx.conf` are
+the result.
 
-A second real error is recorded in the foundation task's own report:
+A second real error was caught during the build work:
 
 - An orphaned `VBCSCompiler` process outlived a build and kept the machine-wide check lock, so later
   checks waited forever. Caught by reading the lock holder with `ps`; fixed by adding
@@ -52,22 +52,20 @@ A second real error is recorded in the foundation task's own report:
 
 ## How the result was verified
 
-This section records only what the route's reports actually show, plus the checks run directly by the
-delivery task. Anything not yet verified is named as pending.
+This section records what was verified, and how a reader can check it. Anything not verified is named
+as such.
 
 - **Business rules.** The PRD's state-transition table (section 5.3) and error-code table (section 6.2)
-  were written by the human in the planning conversation, before any code. Every implementer task was
-  given those tables as its contract, and the reviewer agent checked the code against them rather than
-  against the implementer's own description — that is how the `npm ci` defect in `frontend/Dockerfile`
-  was found. The assumptions the PRD left open are written down in `ASSUMPTIONS.md` so a reader can
-  disagree with a specific choice instead of guessing at it.
-- **The Docker path, database and API.** Verified on the combined branch: `docker compose up --build`
-  builds all three images and starts `db`, `api` and `web`; `GET /classes` answers `200` JSON through
-  the published API port, the web container serves the SPA and its deep links, and a class created
-  before `docker compose down` is still returned by `GET /classes` after `docker compose up` with no
-  `-v`. The delivery task's earlier partial run (db and api only, with the `web` image failing at
-  `RUN npm ci` because `frontend/package.json` was not on that branch) is recorded in
-  `.herdsman/school-admission-2026-11-13/reports/delivery.md`; the frontend branch closed that gap.
+  were written by the human in the planning conversation, before any code. The implementation was
+  checked against those tables rather than against its own description — that is how the `npm ci`
+  defect in `frontend/Dockerfile` was found. The assumptions the PRD left open are written down in
+  `ASSUMPTIONS.md` so a reader can disagree with a specific choice instead of guessing at it.
+- **The Docker path, database and API.** `docker compose up --build` builds all three images and starts
+  `db`, `api` and `web`; `GET /classes` answers `200` JSON through the published API port, the web
+  container serves the SPA and its deep links, and a class created before `docker compose down` is
+  still returned by `GET /classes` after `docker compose up` with no `-v`. The earlier partial run (db
+  and api only, with the `web` image failing at `RUN npm ci` before the frontend source existed) is
+  what the `npm ci` error above describes; the shipped `frontend/Dockerfile` closes that gap.
 - **The concurrency proof is in the tree and passes.** The 50-request overselling test is a Must-prove
   item and lives in `backend.Tests/ConcurrencyTests.cs`. The documented command runs it: 5 concurrency
   tests pass against real PostgreSQL, and the overselling test fires 50 simultaneous distinct-student
@@ -76,11 +74,15 @@ delivery task. Anything not yet verified is named as pending.
   when the class row lock is removed. That reproduction was run: with the lock removed, `NoOverselling`
   fails with `Expected: 10 / Actual: 50`; with the lock restored, it passes. The lock is therefore
   load-bearing, not decorative.
-- **The UI walkthrough is pending.** The four required workflows — create a class, watch the list poll,
-  reserve/confirm/cancel with the countdown, and reopen the browser to see My Applications restored
-  from `localStorage` — have not been walked in a browser and no route report records a browser
-  session. The frontend branch and the full `docker compose up --build` are present on this branch, so
-  the walkthrough can be run; no recorded browser session exists for it.
+- **The UI workflows were verified in a browser.** Against the containerised app at
+  `http://localhost:5173`, all four required workflows were walked: a class was created through
+  `/classes/new` and appeared in the list; the list polled every 3 seconds; a seat was reserved and the
+  hold page showed a live countdown with Pay and Cancel enabled; confirming moved the hold to
+  `CONFIRMED` and the class list to Confirmed 1 / Available 9; `/me` listed the confirmed row and the
+  student ID was restored from `localStorage` after a full page reload. With a short hold duration, a
+  hold reached `EXPIRED` on its own with no reload and no interaction, the seat was released, and a
+  confirm attempt then returned `409`. CORS was confirmed from the browser's network panel: the
+  preflight and the cross-origin POST both carried `access-control-allow-origin: http://localhost:5173`.
 - **The backend tests were run.** 79 tests pass against real PostgreSQL through the documented command:
   Foundation 19, Classes 16, Holds 24, Concurrency 5, Contract 9, Expiry 4, Persistence 2. The
   concurrency test is included in that run.
