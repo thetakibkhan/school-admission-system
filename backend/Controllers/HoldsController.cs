@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using SchoolAdmission.Api.Configuration;
 using SchoolAdmission.Api.Data;
 using SchoolAdmission.Api.Dtos;
 using SchoolAdmission.Api.Services;
@@ -16,11 +15,12 @@ public sealed class HoldsController : ControllerBase
 {
     private readonly HoldService _holds;
 
-    // Program.cs is foundation-owned (R11) and registers no application services, so the service is
-    // built from the two dependencies the container does provide.
-    public HoldsController(AdmissionDbContext db, HoldOptions options)
+    // HoldService is registered by Program.cs (foundation-owned, R11); see the handoff line in the
+    // task report. Until that registration lands, MVC's default controller activator still builds the
+    // service from its own registered dependencies.
+    public HoldsController(HoldService holds)
     {
-        _holds = new HoldService(db, options);
+        _holds = holds;
     }
 
     [HttpPost("classes/{classId}/holds")]

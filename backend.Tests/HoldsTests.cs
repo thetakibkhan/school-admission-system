@@ -1,9 +1,13 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using SchoolAdmission.Api.Data;
 using SchoolAdmission.Api.Models;
+using SchoolAdmission.Api.Services;
 
 namespace SchoolAdmission.Tests;
 
@@ -15,10 +19,18 @@ public sealed class HoldsTests : IClassFixture<AdmissionWebApplicationFactory>
 
     private readonly AdmissionWebApplicationFactory _factory;
 
+    // HoldService is constructor-injected into the controllers and its registration belongs in the
+    // foundation-owned Program.cs (R11), so until the integrator lands that handoff the registration is
+    // supplied here. Once Program.cs registers the service this extra registration is redundant but
+    // harmless. Both hosts point at the same database, so the DB helpers stay on _factory.
+    private readonly WebApplicationFactory<Program> _api;
+
     public HoldsTests(AdmissionWebApplicationFactory factory)
     {
         _factory = factory;
         _factory.ResetDatabase();
+        _api = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services => services.AddScoped<HoldService>()));
     }
 
     // ---------------------------------------------------------------- helpers
@@ -46,7 +58,7 @@ public sealed class HoldsTests : IClassFixture<AdmissionWebApplicationFactory>
 
     private HttpClient ClientFor(string? studentId)
     {
-        var client = _factory.CreateApiClient();
+        var client = _api.CreateClient();
         if (studentId is not null)
         {
             client.DefaultRequestHeaders.Add(StudentId.HeaderName, studentId);
