@@ -1,22 +1,13 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using SchoolAdmission.Api.Data;
 using SchoolAdmission.Api.Models;
-using SchoolAdmission.Api.Services;
 
-// Every test class calls AdmissionWebApplicationFactory.ResetDatabase against one shared PostgreSQL
-// database, so xUnit's class-level parallelism makes one class drop the schema while another is
-// querying it (spurious 503s and KeyNotFoundException). Serialize the whole assembly.
-//
-// wip/holds declares the same attribute in backend.Tests/AssemblyInfo.cs. Two [assembly:
-// CollectionBehavior] attributes in one assembly are a CS0579 duplicate-attribute build error, so at
-// merge time exactly one must survive: AssemblyInfo.cs wins and this copy is dropped.
-[assembly: CollectionBehavior(DisableTestParallelization = true)]
+// Assembly-level test serialization lives in backend.Tests/AssemblyInfo.cs. The copy that used to sit
+// here was dropped at merge time: two [assembly: CollectionBehavior] attributes in one assembly are a
+// CS0579 duplicate-attribute build error.
 
 namespace SchoolAdmission.Tests;
 
@@ -28,26 +19,13 @@ public sealed class ClassesTests : IClassFixture<AdmissionWebApplicationFactory>
 
     private readonly AdmissionWebApplicationFactory _factory;
 
-    // ClassService is constructor-injected into ClassesController and its registration belongs in the
-    // foundation-owned Program.cs (R11), so until the integrator lands that handoff the registration is
-    // supplied here. Once Program.cs registers the service this extra registration is redundant but
-    // harmless. Both hosts point at the same database, so the DB helpers stay on _factory.
-    //
-    // xUnit constructs this class once per test, so the derived host is built once for the whole class
-    // and reused; building it per test would leave an undisposed host per test.
-    private static WebApplicationFactory<Program>? _sharedApi;
-
-    private readonly WebApplicationFactory<Program> _api;
-
     public ClassesTests(AdmissionWebApplicationFactory factory)
     {
         _factory = factory;
         _factory.ResetDatabase();
-        _api = _sharedApi ??= factory.WithWebHostBuilder(builder =>
-            builder.ConfigureServices(services => services.AddScoped<ClassService>()));
     }
 
-    private HttpClient CreateClient() => _api.CreateClient();
+    private HttpClient CreateClient() => _factory.CreateApiClient();
 
     [Fact]
     public async Task Create_ValidClass_Returns201WithExactFieldsAndLocation()

@@ -29,6 +29,8 @@ builder.Services.AddDbContext<AdmissionDbContext>((serviceProvider, options) =>
 });
 
 builder.Services.AddControllers();
+builder.Services.AddScoped<SchoolAdmission.Api.Services.ClassService>();
+builder.Services.AddScoped<SchoolAdmission.Api.Services.HoldService>();
 builder.Services.AddProblemDetails();
 
 if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
