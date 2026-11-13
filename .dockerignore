@@ -1,0 +1,10 @@
+# Build context is the repository root; keep host build output and local state out of the images.
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+.git/
+.herdsman/
+worktrees/
+**/.env
+**/*.user
