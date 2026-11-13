@@ -2,7 +2,7 @@
 
 # School Admission System
 
-**Project:** Onnorokom Projukti Limited — Assistant Software Engineer Take-Home Assignment  
+**Project:** School Admission System  
 **PRD version:** 1.0  
 **Status:** Approved planning baseline (implementation not yet verified)  
 **Prepared:** 13 November 2026  

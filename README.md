@@ -124,10 +124,12 @@ database**. There is no in-memory provider and no fallback connection string: th
    ```
 
    The single-threaded flags keep the run reproducible on a small machine; the suite is safe to run
-   without them, but the concurrency test is easier to read when it is not competing for CPU.
+   without them, and once the concurrency test lands it is easier to read when it is not competing
+   for CPU.
 
-The suite covers the API contract, the hold lifecycle (create, duplicate, confirm, cancel, expiry),
-ownership and idempotency.
+On this branch the documented command runs the 18 foundation tests only. Once the classes and holds
+branches merge, the same suite also covers the class endpoints and the hold lifecycle (create,
+duplicate, confirm, cancel, expiry), ownership and idempotency.
 
 **Required but pending:** a concurrency test that fires 50 simultaneous distinct-student hold requests
 at a 10-seat class and asserts `heldSeats + confirmedSeats <= totalSeats` afterwards. That test is a

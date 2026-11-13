@@ -1,8 +1,8 @@
 # AI usage
 
-This file records which AI tools were used, what they did, one real mistake that was caught, and how
-the result was verified by a human. It is written to be checkable against the repository's own
-artefacts, not to be flattering.
+This file records which AI tools were used, what they did, the real mistakes that were caught, and how
+the result was verified. It is written to be checkable against the repository's own artefacts, not to
+be flattering.
 
 ## Tools used
 
