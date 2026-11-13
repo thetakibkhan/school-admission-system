@@ -1,0 +1,28 @@
+# Build output
+bin/
+obj/
+dist/
+build/
+node_modules/
+
+# Environment and secrets
+.env
+.env.local
+*.local
+
+# Tooling
+.herdsman/
+worktrees/
+.vs/
+.vscode/
+.idea/
+*.user
+
+# Logs and temp
+*.log
+tmp/
+.DS_Store
+
+# Test artifacts
+TestResults/
+coverage/
