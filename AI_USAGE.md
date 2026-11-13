@@ -61,26 +61,29 @@ delivery task. Anything not yet verified is named as pending.
   against the implementer's own description — that is how the `npm ci` defect in `frontend/Dockerfile`
   was found. The assumptions the PRD left open are written down in `ASSUMPTIONS.md` so a reader can
   disagree with a specific choice instead of guessing at it.
-- **The Docker path, database and API.** Verified on this branch for the services that exist: the
-  delivery task ran `docker compose up --build -d db api` (exit 0), waited for `/health`
-  (`200 {"status":"ok"}`), then ran `docker compose down` and `docker compose up -d` and confirmed a row
-  written to PostgreSQL before the shutdown was still present afterwards. The exact commands and output
-  are in `.herdsman/school-admission-2026-11-13/reports/delivery.md`. The full `docker compose up
-  --build` including the `web` service **did not pass** on this branch: the frontend source is not here
-  yet, and the build stops at `RUN npm ci` because there is no `package.json`. It is recorded under
-  `gaps:`, not claimed as a pass.
-- **The concurrency proof is pending.** The 50-request overselling test is a Must-prove item written by
-  the concurrency task. No branch in this route contains it yet, and no run of it has been recorded.
-  `README.md` marks it as required and pending. When it lands, the human's check is to run the
-  documented command, read the pass count, and confirm the test fails when the class row lock is
-  removed.
+- **The Docker path, database and API.** Verified on the combined branch: `docker compose up --build`
+  builds all three images and starts `db`, `api` and `web`; `GET /classes` answers `200` JSON through
+  the published API port, the web container serves the SPA and its deep links, and a class created
+  before `docker compose down` is still returned by `GET /classes` after `docker compose up` with no
+  `-v`. The delivery task's earlier partial run (db and api only, with the `web` image failing at
+  `RUN npm ci` because `frontend/package.json` was not on that branch) is recorded in
+  `.herdsman/school-admission-2026-11-13/reports/delivery.md`; the frontend branch closed that gap.
+- **The concurrency proof is in the tree and passes.** The 50-request overselling test is a Must-prove
+  item and lives in `backend.Tests/ConcurrencyTests.cs`. The documented command runs it: 5 concurrency
+  tests pass against real PostgreSQL, and the overselling test fires 50 simultaneous distinct-student
+  hold requests at a 10-seat class and asserts `heldSeats + confirmedSeats <= totalSeats` afterwards.
+  The human's check is to run the documented command, read the pass count, and confirm the test fails
+  when the class row lock is removed. That reproduction was run: with the lock removed, `NoOverselling`
+  fails with `Expected: 10 / Actual: 50`; with the lock restored, it passes. The lock is therefore
+  load-bearing, not decorative.
 - **The UI walkthrough is pending.** The four required workflows — create a class, watch the list poll,
   reserve/confirm/cancel with the countdown, and reopen the browser to see My Applications restored
   from `localStorage` — have not been walked in a browser and no route report records a browser
-  session. They depend on the frontend branch and on a full `docker compose up --build`, neither of
-  which is present on this branch.
-- **The backend tests that do exist were run.** 18 foundation tests passed against real PostgreSQL
-  through the documented command, and the classes task reports 34/34 on its branch.
+  session. The frontend branch and the full `docker compose up --build` are present on this branch, so
+  the walkthrough can be run; no recorded browser session exists for it.
+- **The backend tests were run.** 79 tests pass against real PostgreSQL through the documented command:
+  Foundation 19, Classes 16, Holds 24, Concurrency 5, Contract 9, Expiry 4, Persistence 2. The
+  concurrency test is included in that run.
 
 ## Secrets and personal data
 

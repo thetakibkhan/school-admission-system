@@ -124,17 +124,23 @@ database**. There is no in-memory provider and no fallback connection string: th
    ```
 
    The single-threaded flags keep the run reproducible on a small machine; the suite is safe to run
-   without them, and once the concurrency test lands it is easier to read when it is not competing
-   for CPU.
+   without them, and the concurrency test is easier to read when it is not competing for CPU.
 
-On this branch the documented command runs the 18 foundation tests only. Once the classes and holds
-branches merge, the same suite also covers the class endpoints and the hold lifecycle (create,
-duplicate, confirm, cancel, expiry), ownership and idempotency.
+The documented command runs 79 tests against real PostgreSQL:
 
-**Required but pending:** a concurrency test that fires 50 simultaneous distinct-student hold requests
-at a 10-seat class and asserts `heldSeats + confirmedSeats <= totalSeats` afterwards. That test is a
-Must-prove item and is written by the concurrency task; it is not in the tree yet, so the command above
-does not run it today. The README is updated when that branch lands.
+| Test class | Tests | Covers |
+|---|---|---|
+| `FoundationTests` | 19 | schema, seat-count queries, options, health |
+| `ClassesTests` | 16 | class create, list, read, validation |
+| `HoldsTests` | 24 | hold create, duplicate, confirm, cancel, expiry, ownership, idempotency |
+| `ConcurrencyTests` | 5 | 50 simultaneous distinct-student holds against 10 seats |
+| `ContractTests` | 9 | exact JSON key sets and status codes for all eight routes |
+| `ExpiryTests` | 4 | expiry derived from database time, with no worker |
+| `PersistenceTests` | 2 | data survives a restart |
+
+The concurrency test fires 50 simultaneous distinct-student hold requests at a 10-seat class and
+asserts `heldSeats + confirmedSeats <= totalSeats` afterwards. It fails when the per-class row lock is
+removed, which is how the lock is proven to be load-bearing.
 
 ## Frontend tests and type check
 
